@@ -1,6 +1,6 @@
 # AI Business Analyst Agent
 
-An enterprise-grade, agentic AI Business Analyst built with **LangChain**, **LangGraph**, and **Retrieval-Augmented Generation (RAG)** over persistent vector databases (**ChromaDB**).
+An enterprise-grad, agentic AI Business Analyst built with **LangChain**, **LangGraph**, and **Retrieval-Augmented Generation (RAG)** over persistent vector databases (**ChromaDB**).
 
 The agent acts as an autonomous Senior Business Analyst and Product Manager: it conducts interactive stakeholder elicitation, discovers missing features, styles project branding, grounds technical requirements using domain knowledge bases, generates agile user stories with Gherkin acceptance criteria, validates full traceability, and exports production-ready documents in both **Word (.docx)** and **Markdown (.md)** formats alongside machine-readable JSON contracts.
 
@@ -203,5 +203,3 @@ Each agent execution creates an isolated run directory under `outputs/runs/<proj
 
 ---
 
-## License
-MIT License. Open-source and free to adapt for personal or commercial requirements engineering workflows.

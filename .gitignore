@@ -21,5 +21,6 @@ outputs/runs/*
 *.swp
 *.swo
 
-# Vector store dynamic index files (keep manifest and sample)
-*.log
+
+# Vector database
+vector_store/
