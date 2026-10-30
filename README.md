@@ -53,16 +53,14 @@ flowchart TD
 
 ## Key Features
 
-- **LangGraph State Machine Orchestration**: Deterministic multi-step agent workflow with checkpoints, conditional branching, human-in-the-loop interrupts (`langgraph.types.interrupt`), and automated repair loops.
-- **Retrieval-Augmented Generation (RAG)**: Integrates persistent **ChromaDB** vector storage with semantic search over domain knowledge documents (e.g. e-commerce patterns, ISO/IEC 25010 software quality standards, MoSCoW prioritization).
-- **Flexible Embedding Options**:
-  - **Local Offline Embeddings**: Fast, air-gapped `sentence-transformers/all-MiniLM-L6-v2` via `langchain-huggingface` with local file resolution.
-  - **Cloud Embeddings**: Google Gemini `models/text-embedding-004` via `langchain-google-genai`.
-- **Multi-Provider LLM Support**: Supports **Google Gemini** (`gemini-2.5-flash`, etc.) and **OpenRouter** (`gpt-4o-mini`, `claude-3-5`, `llama-3`, etc.) with bounded JSON parsing retries.
-- **Knowledge Base Deduplication**: Manifest-driven SHA256 document hashing and deterministic chunk IDs (`source::index::hash`) ensure repeat ingestion performs zero redundant embedding calls.
-- **Complete Requirements Traceability (RTM)**: Formally verifies that every client feature maps to Functional Requirements (`FR-xx`), every FR maps to User Stories (`US-xx`), and every User Story has testable Gherkin Acceptance Criteria (`AC-xx`).
-- **Dual-Format Artifact Publishing**: Simultaneously exports styled Microsoft Word (`.docx`) documents and clean GitHub-flavored Markdown (`.md`) files.
-
+- **Interactive Requirement Gathering:** Collects project details through questions, asks follow-ups when needed, and suggests features that may have been overlooked.
+- **LangGraph Workflow:** Manages the different stages of the agent, including conditional steps, review points, and revision loops.
+- **RAG with ChromaDB:** Retrieves relevant information from reference documents to support requirements analysis.
+- **Flexible Embeddings:** Supports local HuggingFace embeddings and Google Gemini embeddings.
+- **Multiple LLM Providers:** Supports Google Gemini and OpenRouter, with configurable models.
+- **Knowledge Base Management:** Uses SHA256 hashing and document IDs to avoid processing unchanged documents again.
+- **Requirements Traceability:** Connects client features to Functional Requirements (FRs), User Stories (USs), and Acceptance Criteria (ACs).
+- **Document Generation:** Exports project documents in Word (.docx) and Markdown (.md), along with structured JSON files.
 
 ### Requirements & Analysis Methods
 
