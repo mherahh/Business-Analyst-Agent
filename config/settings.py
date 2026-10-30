@@ -46,6 +46,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004")
 
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "local")
+LOCAL_EMBEDDING_MODEL = os.getenv("LOCAL_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+
 # ---------------------------------------------------------------------------
 # New in Phase 3C.1: RAG / persistent vector store configuration.
 #
@@ -64,7 +67,7 @@ RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))
 # Relevance score from langchain's similarity_search_with_relevance_scores
 # is normalized to roughly [0, 1], higher = more relevant. A chunk scoring
 # below this threshold is treated as not relevant enough to cite.
-RAG_RELEVANCE_THRESHOLD = float(os.getenv("RAG_RELEVANCE_THRESHOLD", "0.25"))
+RAG_RELEVANCE_THRESHOLD = float(os.getenv("RAG_RELEVANCE_THRESHOLD", "0.15"))
 
 _SAFE_SLUG_RE = re.compile(r"[^a-z0-9]+")
 

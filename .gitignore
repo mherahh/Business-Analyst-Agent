@@ -1,6 +1,25 @@
+# Environment & virtual environments
 .env
 .venv/
+env/
+venv/
+
+# Python bytecode & cache
 __pycache__/
 *.py[cod]
-outputs/*
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Generated execution deliverables (keep directory anchor)
+outputs/runs/*
 !outputs/.gitkeep
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Vector store dynamic index files (keep manifest and sample)
+*.log

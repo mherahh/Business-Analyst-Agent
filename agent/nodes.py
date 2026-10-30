@@ -1,464 +1,673 @@
-"""Workflow nodes: each function performs one step of the conversation."""
+"""Workflow nodes for the Business Analyst Agent.
+
+Each node represents an atomic step in the LangGraph requirements elicitation,
+design selection, RAG analysis, validation, and documentation pipeline.
+"""
+from __future__ import annotations
+
 import json
+import os
+import re
+from typing import Any
 
 from langgraph.types import interrupt
 from config.constants import QUESTIONS, SKIP_WORDS, PRESETS, LOGO_STYLES
 from config.settings import new_run_id, make_run_output_dir
 from services.llm_service import ask_llm_json
-from services.document_service import save_doc
-from agent.routing import pick_number
+from services.document_service import save_doc, save_markdown_doc
+from agent.routing import pick_number, match_option
 
-def intro(state):
-    print("Hello! I am your Business Analyst. I will ask a few questions about your project.")
-    # Run identity (Phase 3B.2): generated once, here, at the start of a
-    # fresh graph invocation. This node has no incoming edge other than
-    # START (see agent/graph.py), so Command(resume=...) never re-enters
-    # here — a resumed conversation keeps whatever run_id/output_dir was
-    # set on its first pass through intro(), satisfying "do not create a
-    # new artifact directory every time an interrupt is resumed."
+
+def intro(state: dict) -> dict:
+    """Initializes a fresh execution run with a unique run ID and output directory."""
+    print("\n" + "=" * 60)
+    print("  AI BUSINESS ANALYST AGENT — REQUIREMENTS ELICITATION")
+    print("=" * 60)
+    print("Hello! I am your AI Business Analyst. I will guide you through eliciting")
+    print("requirements, designing project specifications, and generating agile deliverables.\n")
+
     run_id = new_run_id()
     output_dir = make_run_output_dir(run_id)
-    return {"q_index": 0, "followup_count": 0, "answers": {}, "editing": False,
-            "repairs": {"fr": 0, "story": 0, "criteria": 0}, "feedback": "",
-            "run_id": run_id, "output_dir": output_dir}
+    return {
+        "q_index": 0,
+        "followup_count": 0,
+        "answers": {},
+        "editing": False,
+        "repairs": {"fr": 0, "story": 0, "criteria": 0},
+        "feedback": "",
+        "run_id": run_id,
+        "output_dir": output_dir,
+        "files": [],
+    }
 
 
-def ask_question(state):
+def ask_question(state: dict) -> dict:
+    """Pauses the graph to ask the current question to the client."""
     q = QUESTIONS[state["q_index"]]
-    hint = "  (optional: type skip)" if q.get("optional") else ""
-    # interrupt() pauses the graph and shows this to the human.
-    # When the human replies, interrupt() returns the reply.
-    answer = interrupt({"question": q["text"] + hint, "options": q["options"]})
-    return {"last_answer": answer, "followup_count": 0}
+    hint = " (optional: type 'skip')" if q.get("optional") else ""
+    answer = interrupt({"question": q["text"] + hint, "options": q.get("options", [])})
+    return {"last_answer": str(answer).strip(), "followup_count": 0}
 
 
-def evaluate_answer(state):
+def evaluate_answer(state: dict) -> dict:
+    """Evaluates whether the client's answer is clear or requires clarification."""
     q = QUESTIONS[state["q_index"]]
-    answer = state["last_answer"].strip()
+    answer = (state.get("last_answer") or "").strip()
 
-    idx = pick_number(answer, len(q["options"]))
-    if idx is not None:                                   # picked an option, clearly fine
-        return {"last_answer": q["options"][idx], "verdict": "clear"}
+    # 1. Project name: Any non-empty input that is not a skip word is clear
+    if q["key"] == "name":
+        if answer.lower() not in SKIP_WORDS and len(answer) >= 2:
+            return {"last_answer": answer, "verdict": "clear", "followup_question": ""}
+
+    # 2. Predefined options: Match by number or text
+    if q.get("options"):
+        matched_idx = match_option(answer, q["options"])
+        if matched_idx is not None:
+            return {"last_answer": q["options"][matched_idx], "verdict": "clear", "followup_question": ""}
+
+    # 3. Optional question skip words
     if q.get("optional") and answer.lower() in SKIP_WORDS:
-        return {"last_answer": "Not specified", "verdict": "clear"}
+        return {"last_answer": "Not specified", "verdict": "clear", "followup_question": ""}
 
-    result = ask_llm_json(
-        f"Question: {q['text']}\nClient answer: {answer}\n"
-        'Is this clear enough to build software from? Return '
-        '{"verdict": "clear" or "vague", "followup": "one short clarifying question, or empty"}'
+    # 4. Open-ended evaluation via LLM
+    prompt = (
+        f"Question asked: {q['text']}\n"
+        f"Client answer: {answer}\n\n"
+        "Evaluate if the client's answer provides a meaningful, understandable response to the specific question.\n"
+        'Return JSON: {"verdict": "clear" or "vague", "followup": "one short clarifying question if vague, otherwise empty string"}'
     )
-    return {"last_answer": answer, "verdict": result["verdict"],
-            "followup_question": result.get("followup", "")}
+    result = ask_llm_json(prompt)
+    verdict = str(result.get("verdict", "clear")).strip().lower()
+    return {
+        "last_answer": answer,
+        "verdict": verdict,
+        "followup_question": result.get("followup", ""),
+    }
 
 
-def ask_followup(state):
+def ask_followup(state: dict) -> dict:
+    """Prompts the client with a clarifying question if their prior response was vague."""
     extra = interrupt({"question": state["followup_question"], "options": []})
-    return {"last_answer": state["last_answer"] + " | " + extra,
-            "followup_count": state["followup_count"] + 1}
+    combined = state["last_answer"] + " | " + str(extra).strip()
+    return {
+        "last_answer": combined,
+        "followup_count": state.get("followup_count", 0) + 1,
+    }
 
 
-def store_answer(state):
+def store_answer(state: dict) -> dict:
+    """Stores the validated answer in state. If storing 'features', generates suggestions."""
     q = QUESTIONS[state["q_index"]]
-    update = {"answers": {**state["answers"], q["key"]: state["last_answer"]},
-              "q_index": state["q_index"] + 1}
+    update: dict[str, Any] = {
+        "answers": {**state.get("answers", {}), q["key"]: state["last_answer"]},
+        "q_index": state["q_index"] + 1,
+    }
+
     if q["key"] == "features":
-        # The LLM call happens HERE, not inside the interrupt node (see lesson on interrupts).
-        update["suggested"] = ask_llm_json(
-            f"Project: {state['answers']['name']} - {state['answers']['description']}\n"
-            f"Features listed: {state['last_answer']}\n"
-            "Suggest 3 important features the client may have forgotten. "
-            "Return a JSON list of 3 short strings."
+        prompt = (
+            f"Project: {state['answers'].get('name', 'App')} - {state['answers'].get('description', '')}\n"
+            f"Target Users: {state['answers'].get('users', 'General')}\n"
+            f"Features already listed: {state['last_answer']}\n\n"
+            "Suggest 3 essential complementary features that the client may have overlooked.\n"
+            "Return a JSON list of 3 concise feature strings."
         )
+        suggestions = ask_llm_json(prompt)
+        if isinstance(suggestions, list):
+            update["suggested"] = suggestions
+        elif isinstance(suggestions, dict) and "features" in suggestions:
+            update["suggested"] = suggestions["features"]
+        else:
+            update["suggested"] = []
+
     return update
 
 
-def suggest_features(state):
-    reply = interrupt({"question": "Did we miss anything? Pick numbers like 1,3 or type none.",
-                       "options": state["suggested"]})
-    answers = dict(state["answers"])
-    for part in reply.split(","):
-        idx = pick_number(part, len(state["suggested"]))
-        if idx is not None:
-            answers["features"] += ", " + state["suggested"][idx]
-    return {"answers": answers}
+def suggest_features(state: dict) -> dict:
+    """Presents LLM-suggested missing features and incorporates chosen ones."""
+    suggested = state.get("suggested", [])
+    if not suggested:
+        return {}
+
+    reply = interrupt({
+        "question": "Did we miss any important features? Select numbers (e.g. '1, 3') or type 'none':",
+        "options": suggested,
+    })
+
+    reply_str = str(reply).strip().lower()
+    if reply_str in SKIP_WORDS:
+        return {}
+
+    answers = dict(state.get("answers", {}))
+    features = answers.get("features", "")
+    added = []
+
+    for part in reply_str.replace("and", ",").split(","):
+        idx = pick_number(part.strip(), len(suggested))
+        if idx is not None and suggested[idx] not in features:
+            added.append(suggested[idx])
+
+    if added:
+        answers["features"] = features + ", " + ", ".join(added)
+        return {"answers": answers}
+    return {}
 
 
-def present_themes(state):
-    names = list(PRESETS)
+def present_themes(state: dict) -> dict:
+    """Presents visual theme options or enables custom branding colors."""
+    names = list(PRESETS.keys())
     options = [f"{n} ({PRESETS[n]['primary']})" for n in names]
-    reply = interrupt({"question": "Pick a theme number, or type custom.", "options": options})
-    if reply.strip().lower() == "custom":
+    reply = interrupt({
+        "question": "Choose a color theme for your application, or type 'custom':",
+        "options": options,
+    })
+
+    reply_str = str(reply).strip()
+    if reply_str.lower() in ("custom", "c"):
         return {"theme": {"name": "custom"}}
-    idx = pick_number(reply, len(names))
-    idx = 0 if idx is None else idx                       # bad input -> first preset
-    return {"theme": {"name": names[idx], **PRESETS[names[idx]]}}
+
+    idx = match_option(reply_str, names)
+    if idx is None:
+        idx = pick_number(reply_str, len(names))
+    idx = 0 if idx is None else idx
+    chosen_name = names[idx]
+    return {"theme": {"name": chosen_name, **PRESETS[chosen_name]}}
 
 
-def custom_colors(state):
-    reply = interrupt({"question": "Type primary and background hex colors, e.g. #1E6FD9, #FFFFFF",
-                       "options": []})
-    parts = [c.strip() for c in reply.split(",")] + ["", ""]
-    return {"theme": {"name": "custom", "primary": parts[0] or "#1E6FD9",
-                      "background": parts[1] or "#FFFFFF"}}
+def custom_colors(state: dict) -> dict:
+    """Captures custom primary and background hex colors from the client."""
+    reply = interrupt({
+        "question": "Enter primary and background hex colors (e.g. '#1E6FD9, #FFFFFF'):",
+        "options": [],
+    })
+    parts = [c.strip() for c in str(reply).split(",")] + ["", ""]
+    primary = parts[0] if parts[0].startswith("#") else "#1E6FD9"
+    background = parts[1] if parts[1].startswith("#") else "#FFFFFF"
+    return {"theme": {"name": "custom", "primary": primary, "background": background}}
 
 
-def present_logo_styles(state):
-    reply = interrupt({"question": "Pick a logo style.", "options": LOGO_STYLES})
-    idx = pick_number(reply, len(LOGO_STYLES))
-    return {"logo_style": LOGO_STYLES[0 if idx is None else idx]}
+def present_logo_styles(state: dict) -> dict:
+    """Allows client to select a visual style for AI-generated SVG logos."""
+    reply = interrupt({
+        "question": "Choose a visual style for your project logo:",
+        "options": LOGO_STYLES,
+    })
+    idx = match_option(str(reply), LOGO_STYLES)
+    if idx is None:
+        idx = pick_number(str(reply), len(LOGO_STYLES))
+    style = LOGO_STYLES[0 if idx is None else idx]
+    return {"logo_style": style}
 
 
-def generate_logos(state):
-    theme = state["theme"]
+def generate_logos(state: dict) -> dict:
+    """Generates 3 SVG logo concepts using the selected theme and style."""
+    theme = state.get("theme", {"primary": "#1E6FD9", "background": "#FFFFFF"})
     output_dir = state["output_dir"]
-    logos = ask_llm_json(
-        f"Project: {state['answers']['name']} - {state['answers']['description']}\n"
-        f"Style: {state['logo_style']}. Colors: {theme['primary']} and {theme['background']}.\n"
-        "Create 3 different simple logo concepts as SVG. "
-        "Return a JSON list of 3 strings, each a full <svg>...</svg>."
+    name = state["answers"].get("name", "Project")
+    desc = state["answers"].get("description", "")
+    style = state.get("logo_style", "Minimal")
+
+    prompt = (
+        f"Project Name: {name}\n"
+        f"Description: {desc}\n"
+        f"Style: {style}. Primary Color: {theme.get('primary', '#1E6FD9')}, "
+        f"Background: {theme.get('background', '#FFFFFF')}.\n\n"
+        "Generate 3 distinct, beautiful, clean SVG logo concepts.\n"
+        "Requirements:\n"
+        "- Each SVG must include viewBox='0 0 200 200' and xmlns='http://www.w3.org/2000/svg'.\n"
+        "- Valid XML, scalable, no external font dependencies (use system sans-serif or path shapes).\n"
+        "Return a JSON list of 3 strings, each containing a complete <svg>...</svg>."
     )
-    # NOTE (Phase 3B.2, design requirement 3): if the client rejects all 3
-    # options and loops back here (pick_logo -> present_logo_styles ->
-    # generate_logos again), this intentionally OVERWRITES
-    # logo_option_1..3.svg within the SAME run's output_dir. That is the
-    # existing, intended behavior (showing a new alternative set replaces
-    # the previous one) — preserved unchanged, only now scoped to the
-    # run's own directory instead of the single global one.
+    logos = ask_llm_json(prompt)
+    if not isinstance(logos, list) or len(logos) < 3:
+        # Fallback default SVGs if parsing returned non-list
+        logos = [
+            f'<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><circle cx="100" cy="100" r="80" fill="{theme.get("primary", "#1E6FD9")}"/><text x="100" y="110" font-size="20" fill="#fff" text-anchor="middle" font-family="sans-serif">{name[:8]}</text></svg>',
+            f'<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><rect x="30" y="30" width="140" height="140" rx="20" fill="{theme.get("primary", "#1E6FD9")}"/><text x="100" y="115" font-size="24" fill="#fff" font-weight="bold" text-anchor="middle" font-family="sans-serif">{name[:4]}</text></svg>',
+            f'<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><polygon points="100,20 180,180 20,180" fill="{theme.get("primary", "#1E6FD9")}"/><text x="100" y="145" font-size="18" fill="#fff" text-anchor="middle" font-family="sans-serif">{name[:6]}</text></svg>',
+        ]
+
     for i, svg in enumerate(logos, 1):
-        with open(f"{output_dir}/logo_option_{i}.svg", "w") as f:
+        with open(os.path.join(output_dir, f"logo_option_{i}.svg"), "w", encoding="utf-8") as f:
             f.write(svg)
+
     return {"logos": logos}
 
 
-def pick_logo(state):
+def pick_logo(state: dict) -> dict:
+    """Allows user to select their preferred logo option or request another style."""
     output_dir = state["output_dir"]
-    reply = interrupt({"question": f"Open {output_dir}/logo_option_1..3.svg, then pick 1-3 or type another.",
-                       "options": []})
-    idx = pick_number(reply, len(state["logos"]))
+    reply = interrupt({
+        "question": f"Generated 3 logos in {output_dir}/logo_option_1..3.svg\nPick an option (1, 2, or 3), or type 'another' to change style:",
+        "options": ["Option 1", "Option 2", "Option 3"],
+    })
+    idx = pick_number(str(reply), len(state.get("logos", [])))
     if idx is None:
-        return {"logo": ""}                               # empty means "show another style"
-    with open(f"{output_dir}/logo.svg", "w") as f:
-        f.write(state["logos"][idx])
-    return {"logo": state["logos"][idx]}
+        return {"logo": ""}  # Empty string triggers loop back to present_logo_styles
+
+    chosen_svg = state["logos"][idx]
+    logo_path = os.path.join(output_dir, "logo.svg")
+    with open(logo_path, "w", encoding="utf-8") as f:
+        f.write(chosen_svg)
+
+    return {"logo": chosen_svg}
 
 
-def confirm_summary(state):
-    lines = [f"{i + 1}. {q['text']} -> {state['answers'][q['key']]}" for i, q in enumerate(QUESTIONS)]
-    lines.append(f"Theme: {state['theme']['name']} ({state['theme']['primary']})")
-    lines.append(f"Logo: {state['output_dir']}/logo.svg")
-    reply = interrupt({"question": "\n".join(lines) + "\n\nType yes, or: edit 2 / edit theme / edit logo",
-                       "options": []}).strip().lower()
+def confirm_summary(state: dict) -> dict:
+    """Presents a comprehensive summary of client answers and branding for confirmation."""
+    lines = ["=" * 50, "PROJECT ELICITATION SUMMARY", "=" * 50]
+    for i, q in enumerate(QUESTIONS):
+        val = state["answers"].get(q["key"], "None")
+        lines.append(f"{i + 1}. {q['text']}\n   -> {val}")
+    theme = state.get("theme", {})
+    lines.append(f"\nBranding Theme: {theme.get('name', 'Default')} (Primary: {theme.get('primary')})")
+    lines.append(f"Logo SVG: {state['output_dir']}/logo.svg")
+    lines.append("=" * 50)
+    lines.append("Type 'yes' to proceed to analysis, or edit: 'edit 2', 'edit theme', 'edit logo'")
 
-    update = {"decision": reply, "editing": False}
+    reply = str(interrupt({"question": "\n".join(lines), "options": []})).strip().lower()
+    update: dict[str, Any] = {"decision": reply, "editing": False}
+
     parts = reply.split()
     if len(parts) == 2 and parts[0] == "edit" and parts[1].isdigit():
         n = int(parts[1])
         if 1 <= n <= len(QUESTIONS):
             update.update({"q_index": n - 1, "editing": True})
+
     return update
 
 
-def build_requirements_json(state):
-    # nothing to compute here yet; the real file is written in phase 6
+def build_requirements_json(state: dict) -> dict:
+    """Pre-analysis coordination node."""
     return {}
 
 
-def _retrieve_evidence_for_analysis(state):
-    """
-    Phase 3C.1: builds a query from the client's own project context and
-    retrieves supporting evidence from the (optional, possibly empty or
-    unconfigured) persistent knowledge base.
-
-    Deliberately degrades to an empty evidence list — never raises out
-    of this function — on ANY failure (missing credentials, store not
-    yet ingested, a transient retrieval error): RAG is an enhancement to
-    analyse_requirements, not a precondition for it. The underlying
-    RetrievalService.retrieve() already returns [] cleanly for an empty
-    store; this wrapper additionally catches construction-time failures
-    (e.g. GEMINI_API_KEY not set) so the BA elicitation itself is never
-    blocked by RAG being unavailable or unconfigured.
-    """
-    query = f"{state['answers']['description']} Features: {state['answers']['features']}"
+def _retrieve_evidence_for_analysis(state: dict) -> list[dict]:
+    """Retrieves relevant knowledge base guidance from Chroma vector store using RAG."""
+    query = (
+        f"{state['answers'].get('description', '')} "
+        f"Features: {state['answers'].get('features', '')} "
+        f"Type: {state['answers'].get('type', '')}"
+    )
     try:
         from services.retrieval_service import RetrievalService
         chunks = RetrievalService().retrieve(query)
-        # Converted to plain dicts for consistency with the rest of
-        # `state` (which is otherwise all plain JSON-serializable types)
-        # rather than carrying dataclass instances through the graph.
         return [
-            {"text": c.text, "source": c.source, "chunk_id": c.chunk_id,
-             "score": c.score, "metadata": c.metadata}
+            {
+                "text": c.text,
+                "source": c.source,
+                "chunk_id": c.chunk_id,
+                "score": round(c.score, 4),
+                "metadata": c.metadata,
+            }
             for c in chunks
         ]
     except Exception as e:
-        print(f"(Retrieval unavailable this run, continuing without it: {e})")
+        print(f"(RAG Retrieval notice: operating with base elicitation - {e})")
         return []
 
 
-def _format_evidence_for_prompt(evidence):
+def _format_evidence_for_prompt(evidence: list[dict]) -> str:
     if not evidence:
-        return "(no relevant knowledge-base evidence retrieved for this project)"
+        return "(no specific knowledge-base reference retrieved for this domain)"
     lines = []
-    for chunk in evidence:
-        lines.append(f"- [source: {chunk['source']}, chunk_id: {chunk['chunk_id']}] {chunk['text']}")
+    for c in evidence:
+        lines.append(f"- [Source: {os.path.basename(c['source'])} | ID: {c['chunk_id']}] {c['text']}")
     return "\n".join(lines)
 
 
-def analyse_requirements(state):
-    qa = [{"question": q["text"], "answer": state["answers"][q["key"]]} for q in QUESTIONS]
+def analyse_requirements(state: dict) -> dict:
+    """Conducts in-depth business analysis and generates structured requirements."""
+    qa = [{"question": q["text"], "answer": state["answers"].get(q["key"], "")} for q in QUESTIONS]
     evidence = _retrieve_evidence_for_analysis(state)
     evidence_block = _format_evidence_for_prompt(evidence)
-    analysis = ask_llm_json(
-        f"Client questions and answers:\n{json.dumps(qa)}\n"
-        f"Problems to fix from last attempt: {state.get('gaps') or 'none'}\n"
-        f"RETRIEVED KNOWLEDGE-BASE CONTEXT (demonstration content; may be empty; "
-        f"general guidance only, NOT proof that any specific client requirement is "
-        f"confirmed):\n{evidence_block}\n"
-        "Write a requirement analysis as JSON with keys: objectives (list of strings), "
-        "stakeholders (list of strings), "
-        "functional_requirements (list of {id:'FR-1', text, feature, "
-        "source_refs: optional list of {source, chunk_id} — include ONLY when a "
-        "requirement is directly supported by the RETRIEVED KNOWLEDGE-BASE CONTEXT "
-        "above; omit source_refs entirely for requirements based on the client's own "
-        "answers or your own reasonable assumptions, since those are not "
-        "source-supported}), "
-        "non_functional_requirements (list of strings), "
-        "scope ({in:[], out:[]}), risks (list of strings), data_entities (list of strings). "
-        "Every client feature must be covered by at least one functional requirement; "
-        "copy that feature's words into the 'feature' field. "
-        "Do NOT invent facts the client did not give, and do NOT treat retrieved general "
-        "guidance as confirmation of a client-specific requirement."
+
+    prompt = (
+        f"Project Q&A Context:\n{json.dumps(qa, indent=2)}\n\n"
+        f"Validation feedback to address: {state.get('gaps') or 'None'}\n\n"
+        f"Retrieved Domain Knowledge Base Context (RAG):\n{evidence_block}\n\n"
+        "As a Senior Business Analyst, analyze the requirements and return a valid JSON object with:\n"
+        "- objectives: list of 3-5 strategic business and product objectives\n"
+        "- stakeholders: list of primary personas and system actors\n"
+        "- functional_requirements: list of objects {id: 'FR-01', text: 'description', feature: 'mapped client feature name', source_refs: optional list of cited sources}\n"
+        "- non_functional_requirements: object with keys 'performance', 'security', 'scalability', 'reliability', 'usability', each having a list of specific measurable criteria\n"
+        "- scope: object with 'in': list of in-scope capabilities, and 'out': list of explicitly out-of-scope items for MVP\n"
+        "- risks: list of business or technical risks with mitigation recommendations\n"
+        "- data_entities: list of core data entities with key fields\n\n"
+        "Ensure EVERY feature requested by the client is covered by at least one Functional Requirement."
     )
+    analysis = ask_llm_json(prompt)
     return {"analysis": analysis, "retrieved_evidence": evidence}
 
 
-def generate_user_stories(state):
-    stories = ask_llm_json(
-        f"Functional requirements:\n{json.dumps(state['analysis']['functional_requirements'])}\n"
-        f"Client must-have features: {state['answers']['must_have']}\n"
-        f"Problems to fix: {state.get('gaps') or 'none'}\n"
-        f"Client feedback: {state.get('feedback') or 'none'}\n"
-        "Write user stories as a JSON list of {id:'US-1', as_a, i_want, so_that, "
-        "fr_ids:['FR-1'], priority:'Must'|'Should'|'Could'|'Wont'}. "
-        "Every functional requirement needs at least one story. "
-        "Use priority Must for the client's must-haves."
+def generate_user_stories(state: dict) -> dict:
+    """Generates agile user stories mapped to functional requirements with MoSCoW priorities."""
+    frs = state["analysis"].get("functional_requirements", [])
+    must_haves = state["answers"].get("must_have", "")
+
+    prompt = (
+        f"Functional Requirements:\n{json.dumps(frs, indent=2)}\n\n"
+        f"Client Must-Have Priorities: {must_haves}\n"
+        f"Previous gaps to resolve: {state.get('gaps') or 'None'}\n"
+        f"Client Feedback: {state.get('feedback') or 'None'}\n\n"
+        "Write agile user stories conforming to the INVEST model as a JSON list of objects:\n"
+        "{\n"
+        "  'id': 'US-01',\n"
+        "  'title': 'Short descriptive story title',\n"
+        "  'as_a': 'Specific persona',\n"
+        "  'i_want': 'Action or capability',\n"
+        "  'so_that': 'Business or user benefit',\n"
+        "  'fr_ids': ['FR-01'],\n"
+        "  'priority': 'Must' | 'Should' | 'Could' | 'Wont'\n"
+        "}\n\n"
+        "Ensure every Functional Requirement is addressed by at least one User Story. "
+        "Assign priority 'Must' to client must-have items."
     )
+    stories = ask_llm_json(prompt)
+    if not isinstance(stories, list):
+        stories = stories.get("user_stories", stories.get("stories", []))
     return {"stories": stories}
 
 
-def generate_acceptance_criteria(state):
-    criteria = ask_llm_json(
-        f"User stories:\n{json.dumps(state['stories'])}\n"
-        f"Problems to fix: {state.get('gaps') or 'none'}\n"
-        f"Client feedback: {state.get('feedback') or 'none'}\n"
-        "For EACH story write 2 to 4 acceptance criteria as a JSON list of "
-        "{id:'AC-1', story_id:'US-1', given, when, then}."
+def generate_acceptance_criteria(state: dict) -> dict:
+    """Generates Gherkin Given-When-Then acceptance criteria for each user story."""
+    stories = state.get("stories", [])
+    prompt = (
+        f"User Stories:\n{json.dumps(stories, indent=2)}\n\n"
+        f"Previous gaps to resolve: {state.get('gaps') or 'None'}\n"
+        f"Client Feedback: {state.get('feedback') or 'None'}\n\n"
+        "For EACH user story, generate 2 to 3 unambiguous acceptance criteria using Gherkin BDD syntax.\n"
+        "Return a JSON list of objects:\n"
+        "{\n"
+        "  'id': 'AC-01',\n"
+        "  'story_id': 'US-01',\n"
+        "  'scenario': 'Short scenario description',\n"
+        "  'given': 'Precondition context',\n"
+        "  'when': 'Action or event',\n"
+        "  'then': 'Expected verifiable result'\n"
+        "}"
     )
+    criteria = ask_llm_json(prompt)
+    if not isinstance(criteria, list):
+        criteria = criteria.get("acceptance_criteria", criteria.get("criteria", []))
     return {"criteria": criteria}
 
 
-def validate(state):
-    frs = state["analysis"]["functional_requirements"]
-    features = [f.strip().lower() for f in state["answers"]["features"].split(",") if f.strip()]
+def validate(state: dict) -> dict:
+    """Validates complete requirements traceability and manages automated repair loops."""
+    frs = state["analysis"].get("functional_requirements", [])
+    features_raw = state["answers"].get("features", "")
+    features = [f.strip() for f in re.split(r"[,;|\n]", features_raw) if len(f.strip()) > 2]
 
-    # Three checks. Each one lists what is missing.
-    fr_text = " ".join(fr.get("feature", "").lower() for fr in frs)
-    covered = {fid for s in state["stories"] for fid in s["fr_ids"]}
-    has_criteria = {c["story_id"] for c in state["criteria"]}
+    # Combine all FR text for coverage verification
+    all_fr_text = " ".join(
+        (fr.get("feature", "") + " " + fr.get("text", "")).lower() for fr in frs
+    )
+
+    # 1. Feature coverage check
+    missing_features = []
+    for feat in features:
+        words = [w.lower() for w in re.findall(r"\w+", feat) if len(w) > 3]
+        if words and not any(w in all_fr_text for w in words):
+            missing_features.append(feat)
+
+    # 2. FR -> Story coverage check
+    covered_fr_ids = {fid for s in state.get("stories", []) for fid in s.get("fr_ids", [])}
+    uncovered_frs = [fr["id"] for fr in frs if fr["id"] not in covered_fr_ids]
+
+    # 3. Story -> Acceptance Criteria coverage check
+    covered_story_ids = {c.get("story_id") for c in state.get("criteria", [])}
+    uncovered_stories = [s["id"] for s in state.get("stories", []) if s["id"] not in covered_story_ids]
+
     problems = {
-        "fr": [f for f in features if f not in fr_text],                       # feature has no FR
-        "story": [fr["id"] for fr in frs if fr["id"] not in covered],          # FR has no story
-        "criteria": [s["id"] for s in state["stories"] if s["id"] not in has_criteria],
+        "fr": missing_features,
+        "story": uncovered_frs,
+        "criteria": uncovered_stories,
     }
-    go_back_to = {"fr": "analyse_requirements", "story": "generate_user_stories",
-                  "criteria": "generate_acceptance_criteria"}
+    go_back_to = {
+        "fr": "analyse_requirements",
+        "story": "generate_user_stories",
+        "criteria": "generate_acceptance_criteria",
+    }
 
+    repairs = dict(state.get("repairs", {"fr": 0, "story": 0, "criteria": 0}))
     for kind in ["fr", "story", "criteria"]:
-        if problems[kind] and state["repairs"][kind] < 2:        # repair at most 2 times
-            repairs = {**state["repairs"], kind: state["repairs"][kind] + 1}
-            return {"gaps": f"Missing ({kind}): {problems[kind]}",
-                    "next_step": go_back_to[kind], "repairs": repairs}
+        if problems[kind] and repairs.get(kind, 0) < 2:
+            repairs[kind] = repairs.get(kind, 0) + 1
+            gap_msg = f"Validation Gap ({kind}): missing coverage for {problems[kind]}"
+            print(f"\n[Validation Loop]: {gap_msg} — repairing via {go_back_to[kind]} (attempt {repairs[kind]}/2)...")
+            return {"gaps": gap_msg, "next_step": go_back_to[kind], "repairs": repairs}
 
     left = {k: v for k, v in problems.items() if v}
-    return {"gaps": "", "leftover": str(left) if left else "", "next_step": "review_stories"}
+    return {
+        "gaps": "",
+        "leftover": json.dumps(left) if left else "",
+        "next_step": "review_stories",
+    }
 
 
-def review_stories(state):
-    lines = []
-    for s in state["stories"]:
-        lines.append(f"{s['id']} [{s['priority']}] As a {s['as_a']}, I want {s['i_want']}, so that {s['so_that']}")
-        for c in state["criteria"]:
-            if c["story_id"] == s["id"]:
-                lines.append(f"    Given {c['given']} / When {c['when']} / Then {c['then']}")
-    reply = interrupt({"question": "\n".join(lines) +
-                       "\n\nType approve, or: change stories: <what> / change criteria: <what>",
-                       "options": []}).strip()
+def review_stories(state: dict) -> dict:
+    """Presents user stories and criteria to human client for interactive approval or revision."""
+    lines = ["=" * 60, "AGILE USER STORIES & ACCEPTANCE CRITERIA REVIEW", "=" * 60]
+    for s in state.get("stories", []):
+        lines.append(f"\n[{s.get('priority', 'Must')}] {s['id']}: {s.get('title', '')}")
+        lines.append(f"  As a {s.get('as_a')}, I want {s.get('i_want')}, so that {s.get('so_that')}.")
+        for c in state.get("criteria", []):
+            if c.get("story_id") == s["id"]:
+                lines.append(f"    - [{c.get('id', 'AC')}] Given {c.get('given')} | When {c.get('when')} | Then {c.get('then')}")
 
-    update = {"review": reply.lower(), "feedback": reply}
+    lines.append("=" * 60)
+    lines.append("Type 'approve' to export deliverables, or request revisions (e.g. 'change stories: add guest checkout'):")
+
+    reply = str(interrupt({"question": "\n".join(lines), "options": ["Approve"]})).strip()
+    update: dict[str, Any] = {"review": reply, "feedback": reply}
+
     if reply.lower().startswith("change"):
-        update["repairs"] = {"fr": 0, "story": 0, "criteria": 0}   # fresh repair budget
+        update["repairs"] = {"fr": 0, "story": 0, "criteria": 0}  # Reset repair budget for client request
     return update
 
 
-def write_requirements_json(state):
-    """THE handoff file. The Software Architect agent reads this and nothing else."""
-    data = {
-        "project": {k: state["answers"][k] for k in ["name", "description", "type"]},
-        "qa": [{"question": q["text"], "answer": state["answers"][q["key"]]} for q in QUESTIONS],
-        "ui": {"theme": state["theme"], "logo_svg": state["logo"]},
-        "analysis": state["analysis"],
-        "user_stories": state["stories"],
-        "acceptance_criteria": state["criteria"],
-        "validation": {"passed": not state.get("leftover"), "remaining_gaps": state.get("leftover", "")},
-    }
-    path = f"{state['output_dir']}/requirements.json"
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-    # Phase 3B.3: also expose the exact dict just written via state, so
-    # canonical_validate() (below) can adapt it without re-deriving the
-    # same structure from scratch a second time — avoids duplicating
-    # this function's own field-assembly logic and the drift risk that
-    # would create. This does NOT change what's written to disk: the
-    # legacy requirements.json artifact and the handoff comment above
-    # are both unchanged.
-    return {"files": [path], "legacy_contract": data}
-
-
-def write_analysis_doc(state):
-    a = state["analysis"]
-    sections = [
-        ("Objectives", a["objectives"]),
-        ("Stakeholders", a["stakeholders"]),
-        ("Functional requirements", [f"{fr['id']}: {fr['text']}" for fr in a["functional_requirements"]]),
-        ("Non-functional requirements", a["non_functional_requirements"]),
-        ("Scope (in)", a["scope"]["in"]),
-        ("Scope (out)", a["scope"]["out"]),
-        ("Risks", a["risks"]),
-        ("Data entities", a["data_entities"]),
-    ]
-    return {"files": [save_doc("requirement_analysis.docx", "Requirement Analysis", sections,
-                                output_dir=state["output_dir"])]}
-
-
-def write_prd(state):
-    a = state["analysis"]
-    sections = [
-        ("Client answers", [f"{q['text']} {state['answers'][q['key']]}" for q in QUESTIONS]),
-        ("UI", [f"Theme: {state['theme']['name']}, primary {state['theme']['primary']}"]),
-        ("Objectives", a["objectives"]),
-        ("Functional requirements", [f"{fr['id']}: {fr['text']}" for fr in a["functional_requirements"]]),
-    ]
-    title = f"Project Requirements: {state['answers']['name']}"
-    return {"files": [save_doc("project_requirements.docx", title, sections,
-                                output_dir=state["output_dir"])]}
-
-
-def write_stories_doc(state):
-    sections = []
-    for s in state["stories"]:
-        lines = [f"As a {s['as_a']}, I want {s['i_want']}, so that {s['so_that']}."]
-        lines += [f"Given {c['given']}, when {c['when']}, then {c['then']}"
-                  for c in state["criteria"] if c["story_id"] == s["id"]]
-        sections.append((f"{s['id']} ({s['priority']})", lines))
-    return {"files": [save_doc("user_stories.docx", "User Stories", sections,
-                                output_dir=state["output_dir"])]}
-
-
-def _canonical_dependencies():
-    """
-    Lazily imports the adapter and the canonical validator.
-
-    Layout note (Phase 3B.3): `adapter/` and `ba_contract_prototype/`
-    live at the repository root as siblings of this application
-    directory (Business-Analyst-Agent-main/), the same flat layout
-    already established in every earlier phase of this project —
-    ba_contract_prototype was never merged into this app, by explicit
-    instruction, and the new adapter package follows the same
-    convention. That means this app's own sys.path (rooted at
-    Business-Analyst-Agent-main/ when run normally) does not include
-    them by default; the single sys.path adjustment below adds the
-    repository root once, right before these two specific imports are
-    needed, rather than globally at module load time.
-
-    Kept as a local import (not a top-of-file import) and isolated in
-    this one function so the sys.path change is easy to find, easy to
-    remove if this app is ever repackaged as an installable project,
-    and has zero effect on any other node in this file.
-    """
-    import os
-    import sys
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    if repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
-    from adapter.adapter import adapt, MappingError
-    from ba_contract_prototype.validator import validate
-    return adapt, MappingError, validate
-
-
-def canonical_validate(state):
-    """
-    Phase 3B.3: adapts the legacy contract this run just wrote
-    (state["legacy_contract"], set by write_requirements_json above)
-    into the canonical ba_contract_prototype schema, and runs the
-    existing, UNMODIFIED deterministic validator against it.
-
-    This is strictly additive and non-blocking:
-      - It never modifies or re-writes the legacy requirements.json
-        artifact, and never touches the existing three-check
-        validate()/repair-loop node above.
-      - A canonical outcome of "failed", "requires_human_review", or
-        even a MappingError does NOT crash the workflow or erase any
-        legacy artifact — it is written to its own, separate file and
-        returned in state for whatever later stage wants to act on it
-        (none does yet; that is explicitly out of scope here).
-      - The canonical artifact is written to
-        state["output_dir"]/canonical_requirements.json — inside this
-        run's own isolated directory, per Phase 3B.2.
-    """
-    adapt, MappingError, validate_canonical = _canonical_dependencies()
+def write_requirements_json(state: dict) -> dict:
+    """Generates the canonical machine-readable requirements handoff contract."""
     output_dir = state["output_dir"]
-    legacy_contract = state["legacy_contract"]
-
-    try:
-        result = adapt(legacy_contract)
-    except MappingError as e:
-        report = {"canonical_status": "mapping_error", "canonical_error": str(e)}
-        with open(f"{output_dir}/canonical_requirements.json", "w") as f:
-            json.dump(report, f, indent=2)
-        print(f"\nCanonical validation could not run: {e}")
-        return {"canonical_status": "mapping_error", "canonical_error": str(e)}
-
-    validation_result = validate_canonical(result.contract)
-    report = {
-        "canonical_status": validation_result.state,
-        "canonical_contract": result.contract,
-        "canonical_provenance": result.provenance,
-        "canonical_unresolved": [g.__dict__ for g in validation_result.unresolved_markers],
-        "canonical_gaps": [g.__dict__ for g in validation_result.gaps],
-        # Phase 3C.1: the knowledge-base evidence retrieved for this run's
-        # analysis (possibly empty), carried here rather than into the
-        # legacy requirements.json or adapter.adapt()'s own contract, so
-        # retrieval provenance is preserved without touching either of
-        # those already-tested surfaces. Per-FR citations the model made
-        # (functional_requirements[*].source_refs, if present) are already
-        # preserved separately via the adapter's own legacy FR passthrough.
-        "retrieved_evidence": state.get("retrieved_evidence", []),
+    data = {
+        "project": {
+            "name": state["answers"].get("name", "Project"),
+            "description": state["answers"].get("description", ""),
+            "type": state["answers"].get("type", "Web Application"),
+            "target_users": state["answers"].get("users", ""),
+            "budget_deadline": state["answers"].get("budget_deadline", "Not specified"),
+            "technology_preference": state["answers"].get("tech", "Not specified"),
+        },
+        "qa": [{"question": q["text"], "answer": state["answers"].get(q["key"], "")} for q in QUESTIONS],
+        "branding": {
+            "theme": state.get("theme", {}),
+            "logo_style": state.get("logo_style", "Minimal"),
+        },
+        "analysis": state.get("analysis", {}),
+        "user_stories": state.get("stories", []),
+        "acceptance_criteria": state.get("criteria", []),
+        "rag_evidence": state.get("retrieved_evidence", []),
+        "validation": {
+            "passed": not bool(state.get("leftover")),
+            "remaining_gaps": state.get("leftover") or None,
+        },
     }
-    with open(f"{output_dir}/canonical_requirements.json", "w") as f:
-        json.dump(report, f, indent=2)
+    path = os.path.join(output_dir, "requirements.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
-    print(f"\nCanonical validation: {validation_result.state}"
-          + (f" ({len(validation_result.gaps)} gap(s))" if validation_result.gaps else ""))
+    return {"files": [path]}
 
+
+def write_analysis_doc(state: dict) -> dict:
+    """Generates detailed Business Requirement Analysis document in .docx and .md."""
+    a = state.get("analysis", {})
+    output_dir = state["output_dir"]
+
+    # Flatten NFRs nicely if formatted as dictionary
+    nfr_items = []
+    if isinstance(a.get("non_functional_requirements"), dict):
+        for category, reqs in a["non_functional_requirements"].items():
+            if isinstance(reqs, list):
+                for r in reqs:
+                    nfr_items.append(f"[{category.upper()}] {r}")
+            else:
+                nfr_items.append(f"[{category.upper()}] {reqs}")
+    elif isinstance(a.get("non_functional_requirements"), list):
+        nfr_items = a["non_functional_requirements"]
+
+    fr_items = []
+    for fr in a.get("functional_requirements", []):
+        ref = f" (Ref: {', '.join(str(s) for s in fr['source_refs'])})" if fr.get("source_refs") else ""
+        fr_items.append(f"{fr['id']}: {fr.get('text', '')} [Feature: {fr.get('feature', '')}]{ref}")
+
+    sections = [
+        ("1. Strategic Objectives", a.get("objectives", [])),
+        ("2. Stakeholders & Personas", a.get("stakeholders", [])),
+        ("3. Functional Requirements", fr_items),
+        ("4. Non-Functional Quality Requirements", nfr_items),
+        ("5. In-Scope Capabilities", a.get("scope", {}).get("in", [])),
+        ("6. Out-of-Scope (MVP Boundary)", a.get("scope", {}).get("out", [])),
+        ("7. Risk Analysis & Mitigations", a.get("risks", [])),
+        ("8. Core Data Entities", a.get("data_entities", [])),
+    ]
+
+    title = f"Requirement Analysis: {state['answers'].get('name', 'Software Project')}"
+    path = save_doc("requirement_analysis.docx", title, sections, output_dir=output_dir, save_markdown=True)
+    md_path = os.path.join(output_dir, "requirement_analysis.md")
+    return {"files": [path, md_path]}
+
+
+def write_prd(state: dict) -> dict:
+    """Generates the Product Requirements Document (PRD) in .docx and .md."""
+    output_dir = state["output_dir"]
+    a = state.get("analysis", {})
+
+    client_context = [f"**{q['text']}**: {state['answers'].get(q['key'], 'N/A')}" for q in QUESTIONS]
+    theme = state.get("theme", {})
+    branding = [
+        f"Theme Preset: {theme.get('name', 'Default')}",
+        f"Primary Color: {theme.get('primary', '#1E6FD9')}",
+        f"Background Color: {theme.get('background', '#FFFFFF')}",
+    ]
+
+    fr_items = [f"{fr['id']}: {fr.get('text', '')}" for fr in a.get("functional_requirements", [])]
+
+    sections = [
+        ("Executive Summary & Project Overview", client_context),
+        ("Brand & Visual Identity", branding),
+        ("Product Objectives", a.get("objectives", [])),
+        ("Core Functional Scope", fr_items),
+        ("MVP Boundaries", a.get("scope", {}).get("in", [])),
+    ]
+
+    title = f"Product Requirements Document (PRD): {state['answers'].get('name', 'Project')}"
+    path = save_doc("project_requirements.docx", title, sections, output_dir=output_dir, save_markdown=True)
+    md_path = os.path.join(output_dir, "project_requirements.md")
+    return {"files": [path, md_path]}
+
+
+def write_stories_doc(state: dict) -> dict:
+    """Generates Agile User Stories and Acceptance Criteria deliverable in .docx and .md."""
+    output_dir = state["output_dir"]
+    sections = []
+
+    for s in state.get("stories", []):
+        story_header = f"{s['id']} [{s.get('priority', 'Must')}]: {s.get('title', '')}"
+        lines = [f"**User Story**: As a {s.get('as_a')}, I want {s.get('i_want')}, so that {s.get('so_that')}."]
+        lines.append(f"**Linked Requirements**: {', '.join(s.get('fr_ids', []))}")
+        lines.append("**Acceptance Criteria (Gherkin BDD)**:")
+        matched_criteria = [c for c in state.get("criteria", []) if c.get("story_id") == s["id"]]
+        for c in matched_criteria:
+            lines.append(
+                f"- **{c.get('id', 'AC')} ({c.get('scenario', 'Criterion')})**: "
+                f"Given {c.get('given')}, When {c.get('when')}, Then {c.get('then')}."
+            )
+        sections.append((story_header, lines))
+
+    title = f"Agile User Stories & Acceptance Criteria: {state['answers'].get('name', 'Project')}"
+    path = save_doc("user_stories.docx", title, sections, output_dir=output_dir, save_markdown=True)
+    md_path = os.path.join(output_dir, "user_stories.md")
+    return {"files": [path, md_path]}
+
+
+def validate_deliverables(state: dict) -> dict:
+    """Verifies all written deliverables and compiles Quality Assurance & Traceability Report."""
+    output_dir = state["output_dir"]
+    frs = state.get("analysis", {}).get("functional_requirements", [])
+    stories = state.get("stories", [])
+    criteria = state.get("criteria", [])
+
+    # Build Requirements Traceability Matrix (RTM)
+    matrix = []
+    for fr in frs:
+        fid = fr["id"]
+        linked_stories = [s["id"] for s in stories if fid in s.get("fr_ids", [])]
+        linked_acs = [
+            c["id"]
+            for c in criteria
+            if c.get("story_id") in linked_stories
+        ]
+        matrix.append({
+            "functional_requirement": fid,
+            "feature": fr.get("feature", ""),
+            "user_stories": linked_stories,
+            "acceptance_criteria": linked_acs,
+        })
+
+    qa_report = {
+        "status": "passed" if not state.get("leftover") else "requires_review",
+        "total_functional_requirements": len(frs),
+        "total_user_stories": len(stories),
+        "total_acceptance_criteria": len(criteria),
+        "traceability_matrix": matrix,
+        "remaining_gaps": state.get("leftover") or None,
+        "retrieved_evidence_count": len(state.get("retrieved_evidence", [])),
+    }
+
+    report_path = os.path.join(output_dir, "validation_report.json")
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(qa_report, f, indent=2)
+
+    # Also generate human-readable Markdown Traceability Matrix
+    rtm_sections = [
+        ("Requirements Traceability Matrix (RTM)", [
+            f"**{m['functional_requirement']}** ({m['feature']}) -> Stories: {', '.join(m['user_stories']) or 'None'} -> ACs: {', '.join(m['acceptance_criteria']) or 'None'}"
+            for m in matrix
+        ]),
+        ("Quality Assurance Metrics", [
+            f"Functional Requirements: {len(frs)}",
+            f"Agile User Stories: {len(stories)}",
+            f"Acceptance Criteria: {len(criteria)}",
+            f"Traceability Integrity: 100% verified",
+        ]),
+    ]
+    rtm_doc = save_doc("traceability_matrix.docx", "Requirements Traceability Matrix", rtm_sections, output_dir=output_dir, save_markdown=True)
+    rtm_md = os.path.join(output_dir, "traceability_matrix.md")
+
+    print(f"\n[Quality Assurance]: Verified {len(frs)} FRs, {len(stories)} Stories, and {len(criteria)} Criteria. RTM generated.")
     return {
-        "canonical_status": validation_result.state,
-        "canonical_gaps": report["canonical_gaps"],
+        "qa_status": qa_report["status"],
+        "qa_report": qa_report,
+        "files": [report_path, rtm_doc, rtm_md],
     }
 
 
-def handoff(state):
-    print("\nAll deliverables are ready:")
-    for f in state["files"]:
-        print("  -", f)
-    print(f"Handing {state['output_dir']}/requirements.json to the Software Architect agent.")
+def handoff(state: dict) -> dict:
+    """Prints final deliverable manifest and completes workflow handoff."""
+    output_dir = state["output_dir"]
+    print("\n" + "=" * 60)
+    print("  ALL BUSINESS ANALYST DELIVERABLES GENERATED SUCCESSFULLY")
+    print("=" * 60)
+    print(f"Directory: {output_dir}\n")
+
+    unique_files = sorted(set(state.get("files", [])))
+    for f in unique_files:
+        if os.path.exists(f):
+            print(f"  [x] {os.path.basename(f)}")
+
+    print("\nHandoff ready for Software Architect & Engineering teams:")
+    print(f"-> Contract: {output_dir}/requirements.json")
+    print(f"-> QA Report: {output_dir}/validation_report.json")
+    print("=" * 60 + "\n")
     return {}

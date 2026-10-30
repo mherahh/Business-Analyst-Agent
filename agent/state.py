@@ -1,57 +1,51 @@
-"""Shared state passed between LangGraph nodes."""
+"""Shared state definition passed between LangGraph nodes in the Business Analyst workflow."""
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
+
 
 class State(TypedDict, total=False):
-    # run identity (Phase 3B.2): set once by intro(), never regenerated on
-    # resume, since intro() only runs once at the start of a fresh graph
-    # invocation (resuming via Command(resume=...) re-enters the graph at
-    # the interrupted node's checkpoint, not at START/intro again).
-    run_id: str              # unique per artifact-producing execution
-    output_dir: str          # this run's resolved, isolated output directory
-    # canonical adapter/validator integration (Phase 3B.3): additive only,
-    # never read by any pre-existing node.
-    legacy_contract: dict    # the exact dict write_requirements_json wrote to
-                              # requirements.json, exposed so canonical_validate
-                              # doesn't have to re-derive it from scratch
-    canonical_status: str    # one of ba_contract_prototype.schema's validation
-                              # states, or the literal string "mapping_error"
-                              # if adapter.adapt() raised MappingError
-    canonical_error: str     # populated only when canonical_status == "mapping_error"
-    canonical_gaps: list     # the canonical validator's gap list (as dicts), if any
-    # RAG integration (Phase 3C.1): the knowledge-base chunks retrieved for
-    # the most recent analyse_requirements call, as plain dicts
-    # ({text, source, chunk_id, score, metadata}). Always a list — empty
-    # when retrieval was unavailable or found nothing relevant, never
-    # absent, so downstream code can treat it uniformly. Set once per
-    # analyse_requirements call (including repair re-runs, which refresh it).
-    retrieved_evidence: list
-    # phase 1: questions
-    q_index: int            # which question we are on
-    last_answer: str
-    verdict: str            # "clear" or "vague"
-    followup_question: str
-    followup_count: int
-    answers: dict           # {"name": "...", "features": "...", ...}
-    suggested: list         # features the LLM thinks the client forgot
-    editing: bool           # True when the client chose "edit N"
-    # phase 2: UI
-    theme: dict
-    logo_style: str
-    logos: list
-    logo: str
-    # phase 3: confirmation
-    decision: str
-    # phase 4: analysis
-    analysis: dict
-    stories: list
-    criteria: list
-    gaps: str               # problems found by validate (sent back to the LLM to fix)
-    leftover: str           # problems still left after the repair limit
-    next_step: str
-    repairs: dict           # how many repairs we did: {"fr": 0, "story": 0, "criteria": 0}
-    # phase 5: review
-    review: str
-    feedback: str
-    # phase 6: files (Annotated + operator.add means "append, don't overwrite")
-    files: Annotated[list, operator.add]
+    # Run identity and isolated output path
+    run_id: str                      # Unique identifier for this run
+    output_dir: str                  # Isolated output directory under outputs/runs/<run_id>
+
+    # Quality Assurance and Traceability report
+    qa_status: str                   # "passed", "warning", or "failed"
+    qa_report: dict                  # Summary of feature coverage, FR count, story count, AC count
+
+    # RAG evidence retrieved from vector store
+    retrieved_evidence: list[dict]   # Knowledge base chunks retrieved for requirements analysis
+
+    # Phase 1: Interactive requirements elicitation
+    q_index: int                     # Index of current question in QUESTIONS list
+    last_answer: str                 # Most recent human reply
+    verdict: str                     # "clear" or "vague" from evaluate_answer
+    followup_question: str           # Follow-up clarifying question if verdict is vague
+    followup_count: int              # Number of follow-ups asked for current question
+    answers: dict[str, str]          # Stored client answers mapped by question key
+    suggested: list[str]             # Additional feature suggestions from LLM
+    editing: bool                    # Flag indicating whether user is editing a prior answer
+
+    # Phase 2: Design & UI Branding
+    theme: dict[str, str]            # Color theme {"name", "primary", "background"}
+    logo_style: str                  # Chosen visual style for SVG logo
+    logos: list[str]                 # Generated candidate SVG logos
+    logo: str                        # User's chosen final SVG logo string
+
+    # Phase 3: Project Summary Confirmation
+    decision: str                    # User decision ("yes", "edit N", "edit theme", etc.)
+
+    # Phase 4: Business Analysis & Agile Artifact Generation
+    analysis: dict[str, Any]         # Structured requirements analysis (objectives, FRs, NFRs, scope, risks)
+    stories: list[dict[str, Any]]    # Agile user stories with MoSCoW priorities and FR linkages
+    criteria: list[dict[str, Any]]   # Gherkin Given-When-Then acceptance criteria linked to stories
+    gaps: str                        # Problems identified during validation loop
+    leftover: str                    # Remaining gaps if repair attempts exceed limit
+    next_step: str                   # Target node for repair loop or progression
+    repairs: dict[str, int]          # Counter for repair attempts {"fr": 0, "story": 0, "criteria": 0}
+
+    # Phase 5: Client Story Review & Feedback
+    review: str                      # Client feedback or approval decision
+    feedback: str                    # Human change request details if stories/criteria are revised
+
+    # Phase 6: Deliverables Output & Handoff
+    files: Annotated[list[str], operator.add]  # List of generated artifact file paths (appended across nodes)

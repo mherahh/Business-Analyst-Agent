@@ -61,7 +61,7 @@ def main():
     try:
         store = VectorStoreService(persist_directory=VECTOR_STORE_DIR)
     except Exception as e:
-        print(f"\nCould not initialize the vector store (check GEMINI_API_KEY): {e}")
+        print(f"\nCould not initialize the vector store: {e}")
         return 1
 
     summary = store.add_chunks(result.chunks)

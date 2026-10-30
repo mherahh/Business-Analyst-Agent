@@ -75,8 +75,8 @@ class VectorStoreService:
             # requires GEMINI_API_KEY, which not every environment this
             # service is loaded into will have set (e.g. unit tests that
             # never call this path at all).
-            from services.embedding_service import GeminiEmbeddingService
-            self.embedding_service = GeminiEmbeddingService()
+            from services.embedding_service import get_embedding_service
+            self.embedding_service = get_embedding_service()
         # Imported lazily: langchain_chroma/chromadb are not guaranteed
         # to be installed in every environment this repo is checked out
         # into (see PHASE_3C_1_DELIVERY.md). Every other method on this
@@ -87,6 +87,7 @@ class VectorStoreService:
             collection_name=collection_name,
             embedding_function=self.embedding_service.langchain_embeddings,
             persist_directory=self.persist_directory,
+            collection_metadata={"hnsw:space": "cosine"},
         )
 
     def _load_manifest(self) -> dict:
@@ -164,7 +165,11 @@ class VectorStoreService:
         """
         if self.count() == 0:
             return []
-        results = self._store.similarity_search_with_relevance_scores(query, k=k)
+        try:
+            results_with_score = self._store.similarity_search_with_score(query, k=k)
+            results = [(doc, max(0.0, min(1.0, 1.0 - (float(d) / 2.0)))) for doc, d in results_with_score]
+        except Exception:
+            results = self._store.similarity_search_with_relevance_scores(query, k=k)
         out = []
         for doc, score in results:
             if score < threshold:

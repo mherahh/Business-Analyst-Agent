@@ -1,21 +1,23 @@
-python-dotenv
-langgraph
-python-docx
+# Core LangChain & LangGraph Orchestration
+langchain-core>=0.3.0
+langgraph>=0.2.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
 
+# LLM Providers
+langchain-openrouter>=0.2.0
+langchain-google-genai>=2.0.0
 
-langchain-google-genai
+# Vector Database & Retrieval-Augmented Generation (RAG)
+chromadb>=0.5.0
+langchain-chroma>=0.1.4
+langchain-huggingface>=0.1.0
+sentence-transformers>=3.0.0
 
+# Document Ingestion & Deliverables Generation
+python-docx>=1.1.0
+pypdf>=5.0.0
 
-langchain-chroma
-chromadb
-
-
-pypdf
-
-
-langchain-openrouter
-
-
-fastapi
-uvicorn[standard]
-pydantic
+# Web & API (Optional / Extensible)
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
