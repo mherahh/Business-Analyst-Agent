@@ -1,8 +1,10 @@
 # AI Business Analyst Agent
 
-An enterprise-grad, agentic AI Business Analyst built with **LangChain**, **LangGraph**, and **Retrieval-Augmented Generation (RAG)** over persistent vector databases (**ChromaDB**).
+An AI-powered Business Analyst Agent built with LangChain, LangGraph, and RAG (Retrieval-Augmented Generation) using ChromaDB.
 
-The agent acts as an autonomous Senior Business Analyst and Product Manager: it conducts interactive stakeholder elicitation, discovers missing features, styles project branding, grounds technical requirements using domain knowledge bases, generates agile user stories with Gherkin acceptance criteria, validates full traceability, and exports production-ready documents in both **Word (.docx)** and **Markdown (.md)** formats alongside machine-readable JSON contracts.
+The agent helps turn project ideas into structured software requirements. It gathers information through interactive questions, suggests missing features, analyses requirements using reference documents, and generates user stories with acceptance criteria.
+
+It also checks that requirements are properly connected and covered before generating the final project documents in Word, Markdown, and JSON formats.
 
 ---
 
@@ -60,6 +62,16 @@ flowchart TD
 - **Knowledge Base Deduplication**: Manifest-driven SHA256 document hashing and deterministic chunk IDs (`source::index::hash`) ensure repeat ingestion performs zero redundant embedding calls.
 - **Complete Requirements Traceability (RTM)**: Formally verifies that every client feature maps to Functional Requirements (`FR-xx`), every FR maps to User Stories (`US-xx`), and every User Story has testable Gherkin Acceptance Criteria (`AC-xx`).
 - **Dual-Format Artifact Publishing**: Simultaneously exports styled Microsoft Word (`.docx`) documents and clean GitHub-flavored Markdown (`.md`) files.
+
+
+### Requirements & Analysis Methods
+
+The agent uses the following guidelines:
+
+- **MoSCoW:** Prioritises features as Must Have, Should Have, Could Have, and Won't Have (for now).
+- **INVEST:** Guidelines for writing clear and manageable user stories.
+- **Gherkin:** A format for writing test scenarios using Given, When, and Then.
+- **ISO/IEC 25010:** Software quality standards covering areas such as security, usability, and performance.
 
 ---
 
