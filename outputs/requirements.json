@@ -1,0 +1,385 @@
+{
+  "project": {
+    "name": "Campus Connect",
+    "description": "Campus event management platform where students can discover, organize and register for events",
+    "type": "Other",
+    "target_users": "Universtiy Students",
+    "budget_deadline": "10k with 1 month deadline",
+    "technology_preference": "React for frontend"
+  },
+  "qa": [
+    {
+      "question": "What is the name of your project?",
+      "answer": "Campus Connect"
+    },
+    {
+      "question": "Describe the project and what it should do.",
+      "answer": "Campus event management platform where students can discover, organize and register for events"
+    },
+    {
+      "question": "What type of website is it?",
+      "answer": "Other"
+    },
+    {
+      "question": "Who will use it? (e.g. customers, admin)",
+      "answer": "Universtiy Students"
+    },
+    {
+      "question": "List the main features you need (comma separated).",
+      "answer": "User registration/login page, Browse and search events, create/manage events, admin dashboard, email notifications, reccomendations for events"
+    },
+    {
+      "question": "Which of those features are must-have for the first launch?",
+      "answer": "User registration and login, browse and search events, event registration"
+    },
+    {
+      "question": "Any outside services needed? (payments, email, maps...)",
+      "answer": "Email notifications | Users should be notified when the event is approaching, capacity being filled of an event , remidner"
+    },
+    {
+      "question": "Any technology or framework preference? (e.g. Django)",
+      "answer": "React for frontend"
+    },
+    {
+      "question": "Any budget or deadline limits?",
+      "answer": "10k with 1 month deadline"
+    }
+  ],
+  "branding": {
+    "theme": {
+      "name": "Ocean Blue",
+      "primary": "#1E6FD9",
+      "background": "#F5F9FF"
+    },
+    "logo_style": "Playful"
+  },
+  "analysis": {
+    "objectives": [
+      "Enhance student engagement by providing a centralized platform for event discovery and registration.",
+      "Streamline event management processes for students and administrators.",
+      "Facilitate communication and notifications regarding events to improve attendance.",
+      "Create a user-friendly interface that encourages regular use among university students.",
+      "Establish a scalable platform that can accommodate future enhancements and increased user load."
+    ],
+    "stakeholders": [
+      "University Students",
+      "Event Organizers",
+      "University Administrators",
+      "Technical Support Team"
+    ],
+    "functional_requirements": [
+      {
+        "id": "FR-01",
+        "text": "User registration and login functionality.",
+        "feature": "User registration/login page"
+      },
+      {
+        "id": "FR-02",
+        "text": "Ability to browse and search for events based on various criteria.",
+        "feature": "Browse and search events"
+      },
+      {
+        "id": "FR-03",
+        "text": "Functionality for users to create and manage events.",
+        "feature": "create/manage events"
+      },
+      {
+        "id": "FR-04",
+        "text": "Admin dashboard for managing events and users.",
+        "feature": "admin dashboard"
+      },
+      {
+        "id": "FR-05",
+        "text": "Email notifications for event reminders and updates.",
+        "feature": "email notifications"
+      },
+      {
+        "id": "FR-06",
+        "text": "Recommendations for events based on user preferences.",
+        "feature": "recommendations for events"
+      },
+      {
+        "id": "FR-07",
+        "text": "Event registration functionality for users.",
+        "feature": "event registration"
+      }
+    ],
+    "non_functional_requirements": {
+      "performance": [
+        "Page load time should be under 3 seconds.",
+        "System should handle at least 1000 concurrent users."
+      ],
+      "security": [
+        "User data must be encrypted in transit and at rest.",
+        "Implement secure authentication mechanisms (e.g., OAuth)."
+      ],
+      "scalability": [
+        "System architecture should support horizontal scaling.",
+        "Database should handle increased load without performance degradation."
+      ],
+      "reliability": [
+        "System uptime should be 99.9% or higher.",
+        "Backup and recovery processes must be in place."
+      ],
+      "usability": [
+        "User interface should be intuitive and require no more than 3 clicks to register for an event.",
+        "Provide accessibility features to support users with disabilities."
+      ]
+    },
+    "scope": {
+      "in": [
+        "User registration and login",
+        "Browse and search events",
+        "Event registration",
+        "Email notifications"
+      ],
+      "out": [
+        "Advanced analytics dashboard for event organizers",
+        "Mobile application version",
+        "Social media integration for event sharing"
+      ]
+    },
+    "risks": [
+      {
+        "risk": "Potential delays in development due to tight deadline.",
+        "mitigation": "Implement agile methodologies and prioritize must-have features."
+      },
+      {
+        "risk": "User adoption may be lower than expected.",
+        "mitigation": "Conduct user testing and gather feedback to improve usability."
+      },
+      {
+        "risk": "Security vulnerabilities may arise.",
+        "mitigation": "Conduct regular security audits and implement best practices."
+      }
+    ],
+    "data_entities": [
+      {
+        "entity": "User",
+        "key_fields": [
+          "user_id",
+          "name",
+          "email",
+          "password_hash"
+        ]
+      },
+      {
+        "entity": "Event",
+        "key_fields": [
+          "event_id",
+          "title",
+          "description",
+          "date",
+          "capacity"
+        ]
+      },
+      {
+        "entity": "Registration",
+        "key_fields": [
+          "registration_id",
+          "user_id",
+          "event_id",
+          "registration_date"
+        ]
+      }
+    ]
+  },
+  "user_stories": [
+    {
+      "id": "US-01",
+      "title": "User Registration and Login",
+      "as_a": "New user",
+      "i_want": "to register and log in to the application",
+      "so_that": "I can access my account and manage my events",
+      "fr_ids": [
+        "FR-01"
+      ],
+      "priority": "Must"
+    },
+    {
+      "id": "US-02",
+      "title": "Browse and Search Events",
+      "as_a": "User",
+      "i_want": "to browse and search for events based on various criteria",
+      "so_that": "I can find events that interest me",
+      "fr_ids": [
+        "FR-02"
+      ],
+      "priority": "Must"
+    },
+    {
+      "id": "US-03",
+      "title": "Event Registration",
+      "as_a": "User",
+      "i_want": "to register for events",
+      "so_that": "I can participate in the events I am interested in",
+      "fr_ids": [
+        "FR-07"
+      ],
+      "priority": "Must"
+    },
+    {
+      "id": "US-04",
+      "title": "Create and Manage Events",
+      "as_a": "Event organizer",
+      "i_want": "to create and manage my events",
+      "so_that": "I can keep track of my events and make updates as needed",
+      "fr_ids": [
+        "FR-03"
+      ],
+      "priority": "Should"
+    },
+    {
+      "id": "US-05",
+      "title": "Admin Dashboard",
+      "as_a": "Admin user",
+      "i_want": "to access an admin dashboard",
+      "so_that": "I can manage events and users effectively",
+      "fr_ids": [
+        "FR-04"
+      ],
+      "priority": "Should"
+    },
+    {
+      "id": "US-06",
+      "title": "Email Notifications",
+      "as_a": "User",
+      "i_want": "to receive email notifications for event reminders and updates",
+      "so_that": "I can stay informed about the events I am interested in",
+      "fr_ids": [
+        "FR-05"
+      ],
+      "priority": "Could"
+    },
+    {
+      "id": "US-07",
+      "title": "Event Recommendations",
+      "as_a": "User",
+      "i_want": "to receive recommendations for events based on my preferences",
+      "so_that": "I can discover new events that I might enjoy",
+      "fr_ids": [
+        "FR-06"
+      ],
+      "priority": "Could"
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-01",
+      "story_id": "US-01",
+      "scenario": "Successful user registration",
+      "given": "I am on the registration page",
+      "when": "I enter valid registration details and submit the form",
+      "then": "I should receive a confirmation email and be redirected to the login page"
+    },
+    {
+      "id": "AC-02",
+      "story_id": "US-01",
+      "scenario": "Successful user login",
+      "given": "I have a registered account",
+      "when": "I enter my valid credentials and click the login button",
+      "then": "I should be logged in and redirected to my account dashboard"
+    },
+    {
+      "id": "AC-03",
+      "story_id": "US-01",
+      "scenario": "Failed user login with invalid credentials",
+      "given": "I am on the login page",
+      "when": "I enter invalid credentials and click the login button",
+      "then": "I should see an error message indicating invalid credentials"
+    },
+    {
+      "id": "AC-04",
+      "story_id": "US-02",
+      "scenario": "Browse events without filters",
+      "given": "I am on the events page",
+      "when": "I do not apply any filters and click the browse button",
+      "then": "I should see a list of all available events"
+    },
+    {
+      "id": "AC-05",
+      "story_id": "US-02",
+      "scenario": "Search events by keyword",
+      "given": "I am on the events page",
+      "when": "I enter a keyword in the search bar and click search",
+      "then": "I should see a list of events that match the keyword"
+    },
+    {
+      "id": "AC-06",
+      "story_id": "US-02",
+      "scenario": "Filter events by date",
+      "given": "I am on the events page",
+      "when": "I select a date range and click apply filters",
+      "then": "I should see a list of events occurring within the selected date range"
+    },
+    {
+      "id": "AC-07",
+      "story_id": "US-03",
+      "scenario": "Successful event registration",
+      "given": "I am logged in and viewing an event",
+      "when": "I click the register button for the event",
+      "then": "I should receive a confirmation message and see the event in my registered events list"
+    },
+    {
+      "id": "AC-08",
+      "story_id": "US-03",
+      "scenario": "Failed event registration due to full capacity",
+      "given": "I am logged in and viewing a fully booked event",
+      "when": "I click the register button for the event",
+      "then": "I should see a message indicating that the event is fully booked"
+    },
+    {
+      "id": "AC-09",
+      "story_id": "US-04",
+      "scenario": "Create a new event",
+      "given": "I am logged in as an event organizer",
+      "when": "I fill in the event details and click the create event button",
+      "then": "The event should be created and appear in my events list"
+    },
+    {
+      "id": "AC-10",
+      "story_id": "US-04",
+      "scenario": "Edit an existing event",
+      "given": "I am logged in as an event organizer and have an existing event",
+      "when": "I update the event details and click the save button",
+      "then": "The event should be updated with the new details"
+    },
+    {
+      "id": "AC-11",
+      "story_id": "US-05",
+      "scenario": "Access admin dashboard",
+      "given": "I am logged in as an admin user",
+      "when": "I navigate to the admin dashboard",
+      "then": "I should see the admin dashboard with options to manage events and users"
+    },
+    {
+      "id": "AC-12",
+      "story_id": "US-05",
+      "scenario": "Manage user accounts from admin dashboard",
+      "given": "I am on the admin dashboard",
+      "when": "I select a user account to manage",
+      "then": "I should be able to view and edit the user's details"
+    },
+    {
+      "id": "AC-13",
+      "story_id": "US-06",
+      "scenario": "Receive email notifications for event updates",
+      "given": "I am registered for an event and have opted in for notifications",
+      "when": "The event details are updated",
+      "then": "I should receive an email notification about the updates"
+    },
+    {
+      "id": "AC-14",
+      "story_id": "US-07",
+      "scenario": "Receive event recommendations",
+      "given": "I am logged in and have attended events in the past",
+      "when": "I visit the recommendations page",
+      "then": "I should see a list of recommended events based on my preferences"
+    }
+  ],
+  "rag_evidence": [],
+  "validation": {
+    "passed": true,
+    "remaining_gaps": null
+  }
+}
