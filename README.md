@@ -223,5 +223,5 @@ Also Handles Interactive question-and-answer flow, follow-up questions, and feat
 
 2. Muhammad Shayan 
 
-Led the development and implementation of the Business Analysis Agent, including requirements elicitation, FRs/NFRs, user stories, acceptance criteria, validation, traceability, LangGraph workflow, RAG integration, ChromaDB Integration and backend/frontend integration. Also worked on testing, debugging, and preparing the final runnable application
+Led the development and implementation of the Business Analysis Agent, including requirements elicitation, FRs/NFRs, user stories, acceptance criteria, validation, traceability, LangGraph workflow, RAG integration, ChromaDB Integration. Also worked on testing, debugging, and preparing the final runnable application
 
