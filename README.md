@@ -213,3 +213,15 @@ Each agent execution creates an isolated run directory under `outputs/runs/<proj
 
 ---
 
+## Contributions
+
+1. Mherah Fatima 
+
+Contributed to the initial Business Analyst Agent prototype, including its OpenRouter-based implementation and foundational requirements-analysis workflow, supporting the early development of the BA component.
+Also Handles Interactive question-and-answer flow, follow-up questions, and feature suggestions. Also handled requirements analysis, structuring, and generation of the requirements.json file.
+
+
+2. Muhammad Shayan 
+
+Led the development and implementation of the Business Analysis Agent, including requirements elicitation, FRs/NFRs, user stories, acceptance criteria, validation, traceability, LangGraph workflow, RAG integration, ChromaDB Integration and backend/frontend integration. Also worked on testing, debugging, and preparing the final runnable application
+
